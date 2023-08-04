@@ -32,6 +32,9 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
         echo "Copying .heroku files"
         mkdir -p "$ROOT_BUILD_DIR/.heroku"
         cp -nr "$ROOT_BUILD_DIR/$item/.heroku/"* "$ROOT_BUILD_DIR/.heroku/"
+
+        echo "Delete copied .heroku"
+        rm -rf "$ROOT_BUILD_DIR/$item/.heroku/"
       fi
 
       echo "Checking if there are .profile.d files to copy..."
@@ -40,6 +43,9 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
         echo "Copying .profile.d files"
         mkdir -p "$ROOT_BUILD_DIR/.profile.d"
         cp -nr "$ROOT_BUILD_DIR/$item/.profile.d/"* "$ROOT_BUILD_DIR/.profile.d/"
+
+        echo "Delete copied .profile.d"
+        rm -rf "$ROOT_BUILD_DIR/$item/.profile.d/"
       else
         echo "No profile.d files found. Creating..."
         # Install sane-default script for $WEB_CONCURRENCY and $FORWARDED_ALLOW_IPS.
