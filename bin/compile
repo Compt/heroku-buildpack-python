@@ -4,6 +4,7 @@ ROOT_BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
+BIN_DIR=$(cd "$(dirname "$0")"; pwd) # absolute path
 SUBDIRS_ENV_VAR_PATH="$ENV_DIR/PYTHON_SUBDIRS"
 POST_COMPILE_SCRIPT="$ROOT_BUILD_DIR/post_compile_python.sh"
 OG_COMPILE_SCRIPT="$BIN_DIR/og_compile"
