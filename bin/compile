@@ -11,8 +11,8 @@ SUBDIRS_ENV_VAR_PATH="$ENV_DIR/PYTHON_SUBDIRS"
 POST_COMPILE_SCRIPT="$ROOT_BUILD_DIR/post_compile_python.sh"
 OG_COMPILE_SCRIPT="$BIN_DIR/og_compile"
 
-GUNICORN_PROFILE_PATH="$BUILD_DIR/.profile.d/python.gunicorn.sh"
-WEB_CONCURRENCY_PROFILE_PATH="$BUILD_DIR/.profile.d/WEB_CONCURRENCY.sh"
+GUNICORN_PROFILE_PATH="$ROOT_BUILD_DIR/.profile.d/python.gunicorn.sh"
+WEB_CONCURRENCY_PROFILE_PATH="$ROOT_BUILD_DIR/.profile.d/WEB_CONCURRENCY.sh"
 
 if test -f "$SUBDIRS_ENV_VAR_PATH"; then
   subdirs_str=$(cat "$SUBDIRS_ENV_VAR_PATH")
@@ -31,8 +31,9 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
         mkdir -p "$ROOT_BUILD_DIR/.profile.d"
         cp -n "$ROOT_BUILD_DIR/$item/.profile.d/*" "$ROOT_BUILD_DIR/.profile.d/"
       else
-        echo "No profile.d files found"
+        echo "No profile.d files found. Creating..."
         # Install sane-default script for $WEB_CONCURRENCY and $FORWARDED_ALLOW_IPS.
+        mkdir -p "$ROOT_BUILD_DIR/.profile.d"
         cp "$ROOT_DIR/vendor/WEB_CONCURRENCY.sh" "$WEB_CONCURRENCY_PROFILE_PATH"
         cp "$ROOT_DIR/vendor/python.gunicorn.sh" "$GUNICORN_PROFILE_PATH"
       fi
