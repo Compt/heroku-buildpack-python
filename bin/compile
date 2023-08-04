@@ -6,7 +6,7 @@ ENV_DIR=$3
 
 SUBDIRS_ENV_VAR_PATH="$ENV_DIR/PYTHON_SUBDIRS"
 POST_COMPILE_SCRIPT="$ROOT_BUILD_DIR/post_compile_python.sh"
-OG_COMPILE_SCRIPT=./og_compile
+OG_COMPILE_SCRIPT="$BIN_DIR/og_compile"
 
 if test -f "$SUBDIRS_ENV_VAR_PATH"; then
   subdirs_str=$(cat "$SUBDIRS_ENV_VAR_PATH")
