@@ -28,7 +28,7 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
 
       echo "Checking for files under .heroku"
 
-      if test -f "$ROOT_BUILD_DIR/$item/.heroku"; then
+      if test -d "$ROOT_BUILD_DIR/$item/.heroku"; then
         echo "Copying .heroku files"
         mkdir -p "$ROOT_BUILD_DIR/.heroku"
         cp -nr "$ROOT_BUILD_DIR/$item/.heroku/*" "$ROOT_BUILD_DIR/.heroku/"
@@ -36,7 +36,7 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
 
       echo "Checking if there are .profile.d files to copy..."
 
-      if test -f "$ROOT_BUILD_DIR/$item/.profile.d"; then
+      if test -d "$ROOT_BUILD_DIR/$item/.profile.d"; then
         echo "Copying .profile.d files"
         mkdir -p "$ROOT_BUILD_DIR/.profile.d"
         cp -nr "$ROOT_BUILD_DIR/$item/.profile.d/*" "$ROOT_BUILD_DIR/.profile.d/"
