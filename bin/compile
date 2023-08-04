@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -x
+
 ROOT_BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
@@ -24,12 +26,20 @@ if test -f "$SUBDIRS_ENV_VAR_PATH"; then
       echo "Running compile within dir: $ROOT_BUILD_DIR/$item"
       /bin/bash "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR/$item" $CACHE_DIR $ENV_DIR
 
+      echo "Checking for files under .heroku"
+
+      if test -f "$ROOT_BUILD_DIR/$item/.heroku"; then
+        echo "Copying .heroku files"
+        mkdir -p "$ROOT_BUILD_DIR/.heroku"
+        cp -nr "$ROOT_BUILD_DIR/$item/.heroku/*" "$ROOT_BUILD_DIR/.heroku/"
+      fi
+
       echo "Checking if there are .profile.d files to copy..."
 
       if test -f "$ROOT_BUILD_DIR/$item/.profile.d"; then
         echo "Copying .profile.d files"
         mkdir -p "$ROOT_BUILD_DIR/.profile.d"
-        cp -n "$ROOT_BUILD_DIR/$item/.profile.d/*" "$ROOT_BUILD_DIR/.profile.d/"
+        cp -nr "$ROOT_BUILD_DIR/$item/.profile.d/*" "$ROOT_BUILD_DIR/.profile.d/"
       else
         echo "No profile.d files found. Creating..."
         # Install sane-default script for $WEB_CONCURRENCY and $FORWARDED_ALLOW_IPS.
