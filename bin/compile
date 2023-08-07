@@ -14,7 +14,7 @@ if test -f "$CUSTOM_SCRIPT_CONFIG_VAR_PATH"; then
   script_path_val=$(cat "$CUSTOM_SCRIPT_CONFIG_VAR_PATH")
   custom_script_path="$ROOT_BUILD_DIR/$script_path_val"
   echo "Using script $custom_script_path"
-  /bin/bash/ "$custom_script_path" "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
+  /bin/bash "$custom_script_path" "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 else
   echo  "Did not find any custom build scripts. Using default..."
   /bin/bash "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
