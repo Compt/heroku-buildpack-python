@@ -1,68 +1,20 @@
 #!/usr/bin/env bash
 
-set -x
-
 ROOT_BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
 BIN_DIR=$(cd "$(dirname "$0")"; pwd) # absolute path
-ROOT_DIR=$(dirname "$BIN_DIR")
-
-SUBDIRS_ENV_VAR_PATH="$ENV_DIR/PYTHON_SUBDIRS"
-POST_COMPILE_SCRIPT="$ROOT_BUILD_DIR/post_compile_python.sh"
 OG_COMPILE_SCRIPT="$BIN_DIR/og_compile"
 
-GUNICORN_PROFILE_PATH="$ROOT_BUILD_DIR/.profile.d/python.gunicorn.sh"
-WEB_CONCURRENCY_PROFILE_PATH="$ROOT_BUILD_DIR/.profile.d/WEB_CONCURRENCY.sh"
+CUSTOM_SCRIPT_CONFIG_VAR_PATH="$ENV_DIR/PYTHON_BUILD_SCRIPT"
 
-if test -f "$SUBDIRS_ENV_VAR_PATH"; then
-  subdirs_str=$(cat "$SUBDIRS_ENV_VAR_PATH")
+if test -f "$CUSTOM_SCRIPT_CONFIG_VAR_PATH"; then
+  echo "Found custom build script config var: $CUSTOM_SCRIPT_CONFIG_VAR_PATH"
+  custom_script_path=$(cat "$CUSTOM_SCRIPT_CONFIG_VAR_PATH")
+  /bin/bash/ "$custom_script_path" "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
-  subdirs_arr=($(echo "$subdirs_str" | tr ',' '\n'))
-
-  for item in "${subdirs_arr[@]}"
-  do
-      echo "Running compile within dir: $ROOT_BUILD_DIR/$item"
-      /bin/bash "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR/$item" $CACHE_DIR $ENV_DIR
-
-      echo "Checking for files under .heroku"
-
-      if test -d "$ROOT_BUILD_DIR/$item/.heroku"; then
-        echo "Copying .heroku files"
-        mkdir -p "$ROOT_BUILD_DIR/.heroku"
-        cp -nr "$ROOT_BUILD_DIR/$item/.heroku/"* "$ROOT_BUILD_DIR/.heroku/"
-
-        echo "Delete copied .heroku"
-        rm -rf "$ROOT_BUILD_DIR/$item/.heroku/"
-      fi
-
-      echo "Checking if there are .profile.d files to copy..."
-
-      if test -d "$ROOT_BUILD_DIR/$item/.profile.d"; then
-        echo "Copying .profile.d files"
-        mkdir -p "$ROOT_BUILD_DIR/.profile.d"
-        cp -nr "$ROOT_BUILD_DIR/$item/.profile.d/"* "$ROOT_BUILD_DIR/.profile.d/"
-
-        echo "Delete copied .profile.d"
-        rm -rf "$ROOT_BUILD_DIR/$item/.profile.d/"
-      else
-        echo "No profile.d files found. Creating..."
-        # Install sane-default script for $WEB_CONCURRENCY and $FORWARDED_ALLOW_IPS.
-        mkdir -p "$ROOT_BUILD_DIR/.profile.d"
-        cp "$ROOT_DIR/vendor/WEB_CONCURRENCY.sh" "$WEB_CONCURRENCY_PROFILE_PATH"
-        cp "$ROOT_DIR/vendor/python.gunicorn.sh" "$GUNICORN_PROFILE_PATH"
-      fi
-
-  done
-
-  if test -f "$POST_COMPILE_SCRIPT"; then
-    # Use this to move things around if necessary after the build/compile step is completed.
-    echo "Found post compile script ($POST_COMPILE_SCRIPT). Executing..."
-    /bin/bash "$POST_COMPILE_SCRIPT" "$ROOT_BUILD_DIR"
-  fi
 else
-  echo "No subdir found. Defaulting to current directory."
-  /bin/bash "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" $CACHE_DIR $ENV_DIR
+  echo  "Did not find any custom build scripts. Using default..."
+  /bin/bash "$OG_COMPILE_SCRIPT" "$ROOT_BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 fi
-
