@@ -10,7 +10,7 @@ OG_COMPILE_SCRIPT="$BIN_DIR/og_compile"
 CUSTOM_SCRIPT_CONFIG_VAR_PATH="$ENV_DIR/PYTHON_BUILD_SCRIPT"
 
 if test -f "$CUSTOM_SCRIPT_CONFIG_VAR_PATH"; then
-    echo "Found custom build script config var: $CUSTOM_SCRIPT_CONFIG_VAR_PATH"
+  echo "Found custom build script config var: $CUSTOM_SCRIPT_CONFIG_VAR_PATH"
   script_path_val=$(cat "$CUSTOM_SCRIPT_CONFIG_VAR_PATH")
   custom_script_path="$ROOT_BUILD_DIR/$script_path_val"
   echo "Using script $custom_script_path"
