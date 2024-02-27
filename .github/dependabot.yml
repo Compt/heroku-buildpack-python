@@ -8,11 +8,6 @@ updates:
       - "dependencies"
       - "ruby"
       - "skip changelog"
-    groups:
-      ruby-dependencies:
-        update-types:
-          - "minor"
-          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -22,7 +17,7 @@ updates:
       - "github actions"
       - "skip changelog"
   - package-ecosystem: "pip"
-    directory: "/"
+    directory: "/requirements"
     schedule:
       interval: "monthly"
     labels:
