@@ -11,11 +11,7 @@ CUSTOM_SCRIPT_CONFIG_VAR_PATH="$ENV_DIR/PYTHON_BUILD_SCRIPT"
 
 if test -f "$CUSTOM_SCRIPT_CONFIG_VAR_PATH"; then
   echo "Found custom build script config var: $CUSTOM_SCRIPT_CONFIG_VAR_PATH"
-  echo "BIN_DIR: $BIN_DIR"
-  echo "Current directory:"
-  ls
   echo "OG_COMPILE_SCRIPT: $OG_COMPILE_SCRIPT"
-  echo "Variable 0: $0"
 
   script_path_val=$(cat "$CUSTOM_SCRIPT_CONFIG_VAR_PATH")
   custom_script_path="$ROOT_BUILD_DIR/$script_path_val"
