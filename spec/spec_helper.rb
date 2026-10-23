@@ -1,18 +1,25 @@
 # frozen_string_literal: true
 
+ENV['HATCHET_APP_LIMIT'] ||= ENV['CI'] ? '300' : '50'
 ENV['HATCHET_BUILDPACK_BASE'] ||= 'https://github.com/heroku/heroku-buildpack-python.git'
-ENV['HATCHET_DEFAULT_STACK'] ||= 'heroku-24'
+ENV['HATCHET_DEFAULT_STACK'] ||= 'heroku-26'
+ENV['HATCHET_EXPENSIVE_MODE'] ||= '1'
 
+require 'English' # for $CHILD_STATUS
 require 'rspec/core'
 require 'rspec/retry'
 require 'hatchet'
 
-LATEST_PYTHON_3_8 = '3.8.19'
-LATEST_PYTHON_3_9 = '3.9.19'
-LATEST_PYTHON_3_10 = '3.10.14'
-LATEST_PYTHON_3_11 = '3.11.9'
-LATEST_PYTHON_3_12 = '3.12.5'
-DEFAULT_PYTHON_VERSION = LATEST_PYTHON_3_12
+FIXTURE_DIR = Pathname.new(__FILE__).parent.join('fixtures')
+
+LATEST_PYTHON_3_10 = '3.10.22'
+LATEST_PYTHON_3_11 = '3.11.17'
+LATEST_PYTHON_3_12 = '3.12.15'
+LATEST_PYTHON_3_13 = '3.13.17'
+LATEST_PYTHON_3_14 = '3.14.9'
+LATEST_PYTHON_3_15 = '3.15.1'
+DEFAULT_PYTHON_FULL_VERSION = LATEST_PYTHON_3_14
+DEFAULT_PYTHON_MAJOR_VERSION = DEFAULT_PYTHON_FULL_VERSION.gsub(/\.\d+$/, '')
 
 # The requirement versions are effectively buildpack constants, however, we want
 # Dependabot to be able to update them, which requires that they be in requirements
@@ -24,9 +31,12 @@ def get_requirement_version(package_name)
 end
 
 PIP_VERSION = get_requirement_version('pip')
-SETUPTOOLS_VERSION = get_requirement_version('setuptools')
-WHEEL_VERSION = get_requirement_version('wheel')
 PIPENV_VERSION = get_requirement_version('pipenv')
+POETRY_VERSION = get_requirement_version('poetry')
+UV_VERSION = get_requirement_version('uv')
+# This is hardcoded rather than managed by Dependabot since we can't update to newer versions due to:
+# https://github.com/heroku/heroku-buildpack-python/pull/1630#issuecomment-2324236653
+SETUPTOOLS_VERSION = '70.3.0'
 
 # Work around the return value for `default_buildpack` changing after deploy:
 # https://github.com/heroku/hatchet/issues/180
@@ -44,14 +54,29 @@ RSpec.configure do |config|
   config.filter_run_when_matching :focus
   # Allows declaring on which stacks a test/group should run by tagging it with `stacks`.
   config.filter_run_excluding stacks: ->(stacks) { !stacks.include?(ENV.fetch('HATCHET_DEFAULT_STACK')) }
-  # Make rspec-retry output a retry message when its had to retry a test.
+  # Make rspec-retry output a retry message when it's had to retry a test.
   config.verbose_retry = true
+  # This is the number of total attempts, not retries.
+  config.default_retry_count = ENV['CI'] ? 2 : 1
+  # By default there is no sleep between retries.
+  config.default_sleep_interval = 5
 end
 
 def clean_output(output)
-  # Remove trailing whitespace characters added by Git:
-  # https://github.com/heroku/hatchet/issues/162
-  output.gsub(/ {8}(?=\R)/, '')
+  output
+    # Remove trailing whitespace characters added by Git:
+    # https://github.com/heroku/hatchet/issues/162
+    .gsub(/ {8}(?=\R)/, '')
+    # Remove ANSI colour codes used in buildpack output (e.g. error messages).
+    # GitHub Actions runners deliver the escape byte as the two literal characters
+    # "^[" instead of 0x1B, so strip both variants.
+    .gsub(/(?:\e|\^\[)\[[0-9;]+m/, '')
+end
+
+def normalize_trailing_newlines(output)
+  # The platform log stream that captures `run`/`run_multi` command output occasionally appends
+  # an extra trailing newline, which otherwise intermittently breaks exact output assertions.
+  output.sub(/\n+\z/, "\n")
 end
 
 def update_buildpacks(app, buildpacks)

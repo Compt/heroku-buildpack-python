@@ -1,0 +1,2 @@
+# This is the oldest Django version that works on Python 3.10 (our oldest supported Python version).
+Django==2.1.15

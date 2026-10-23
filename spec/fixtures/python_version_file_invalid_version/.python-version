@@ -1,0 +1,19 @@
+# Comments are supported.
+    # Even when indented
+#
+# So are empty lines, and leading/trailing whitespace.
+
+		# So are tabs
+		
+
+# So are CRLFs (this whole file has CRLF line endings)
+
+# This version should be ignored, since it's commented out
+# 2.7.18
+
+  # This version number has:
+  # - a leading zero width space character
+  # - a normal space and a non-breaking space in the middle
+  # - a trailing ESC control character (from an ANSI escape sequence) at the end
+  ​python -	 3.12.0[0m  
+  

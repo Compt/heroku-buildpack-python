@@ -1,8 +1,12 @@
 # Default to requesting pull request reviews from the Heroku Languages team.
+#ECCN:Open Source
+#GUSINFO:Heroku - Languages,Heroku Python Platform
 * @heroku/languages
 
 # However, request review from the language owner instead for files that are updated
 # by Dependabot or release automation, to reduce team review request noise.
 CHANGELOG.md @edmorley
 Gemfile.lock @edmorley
+/.github/workflows/ @edmorley
+/builds/Dockerfile @edmorley
 /requirements/ @edmorley

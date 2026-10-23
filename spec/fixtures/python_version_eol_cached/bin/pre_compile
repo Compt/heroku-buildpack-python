@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Emulate the cache from a previous build that used a now-EOL Python version.
+mkdir -p "${CACHE_DIR:?}/.heroku"
+echo "python-3.9.25" >"${CACHE_DIR}/.heroku/python-version"

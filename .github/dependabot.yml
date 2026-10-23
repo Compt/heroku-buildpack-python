@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    allow:
+      # Update transitive dependencies too.
+      - dependency-type: "all"
     labels:
       - "dependencies"
       - "ruby"
@@ -13,6 +16,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+  - package-ecosystem: "docker"
+    directory: "/builds"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "skip changelog"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -25,6 +36,20 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    # Override GitHub's default 3-day cooldown so manually-triggered runs pick up
+    # the latest versions immediately (the monthly schedule already reduces the
+    # chance of picking up a too-new release).
+    cooldown:
+      default-days: 0
+    allow:
+      # Update transitive dependencies too.
+      - dependency-type: "all"
     labels:
       - "dependencies"
       - "python"
+    groups:
+      # We don't limit grouping for Python to just minor/patch versions, since pip doesn't follow
+      # semver, plus having to update CHANGELOG.md means it's easier to just have a single PR.
+      python-dependencies:
+        patterns:
+          - "*"

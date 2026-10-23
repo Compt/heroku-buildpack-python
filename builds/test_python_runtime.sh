@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+shopt -s inherit_errexit
 
 ARCHIVE_FILEPATH="${1:?"Error: The filepath of the Python runtime archive must be specified as the first argument."}"
+
+function abort() {
+	echo "Error: ${1}" >&2
+	exit 1
+}
+
+set -x
 
 # We intentionally extract the Python runtime into a different directory to the one into which it
 # was originally installed before being packaged, to check that relocation works (since buildpacks
@@ -13,36 +21,79 @@ export LD_LIBRARY_PATH="${INSTALL_DIR}/lib/"
 
 tar --zstd --extract --verbose --file "${ARCHIVE_FILEPATH}" --directory "${INSTALL_DIR}"
 
-# Check Python is able to start and is usable via both the default `python3` command and the
-# `python` symlink we create during the build. We use the full filepath rather than adding the
+# Check Python is able to start and is usable via both the default `python3` + `python3.XX` commands
+# and the `python` symlink we create during the build. We use the full filepath rather than adding the
 # directory to PATH to ensure the test doesn't pass because of falling through to system Python.
 "${INSTALL_DIR}/bin/python3" --version
+major_python_version="$("${INSTALL_DIR}/bin/python3" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+"${INSTALL_DIR}/bin/python${major_python_version}" --version
 "${INSTALL_DIR}/bin/python" --version
+
+# Check the Python config script still exists/works after the deletion of scripts with broken shebang lines.
+"${INSTALL_DIR}/bin/python3-config" --help
+
+set +x
+
+# Check that the broken bin entrypoints and symlinks (such as `idle3` and `pydoc3`) were deleted.
+UNEXPECTED_BIN_FILES="$(find "${INSTALL_DIR}/bin" -type 'f,l' -not -name 'python*')"
+if [[ -n "${UNEXPECTED_BIN_FILES}" ]]; then
+	echo "${UNEXPECTED_BIN_FILES}"
+	abort "The above files were found in the bin/ directory but weren't expected!"
+else
+	echo "No unexpected files found in the bin/ directory."
+fi
 
 # Check that all dynamically linked libraries exist in the run image (since it has fewer packages than the build image).
 LDD_OUTPUT=$(find "${INSTALL_DIR}" -type f,l \( -name 'python3' -o -name '*.so*' \) -exec ldd '{}' +)
 if grep 'not found' <<<"${LDD_OUTPUT}" | sort --unique; then
-  echo "The above dynamically linked libraries were not found!"
-  exit 1
+	abort "The above dynamically linked libraries weren't found!"
+else
+	echo "All dynamically linked libraries were found."
 fi
 
 # Check that optional and/or system library dependent stdlib modules were built.
+# Some modules (such as `decimal` and `hashlib`) fall back to pure Python or builtin implementations
+# if their C accelerator module wasn't built, so we import those underlying C modules directly.
+# `tkinter` is intentionally omitted, since it's not built (the Tcl/Tk libraries aren't installed).
 optional_stdlib_modules=(
-  _uuid
-  bz2
-  ctypes
-  curses
-  dbm.gnu
-  dbm.ndbm
-  decimal
-  lzma
-  readline
-  sqlite3
-  ssl
-  xml.parsers.expat
-  zlib
+	_decimal
+	_hashlib
+	_uuid
+	bz2
+	ctypes
+	curses
+	curses.panel
+	dbm.gnu
+	dbm.ndbm
+	lzma
+	readline
+	sqlite3
+	ssl
+	xml.parsers.expat
+	zlib
 )
-if ! "${INSTALL_DIR}/bin/python3" -c "import $(IFS=, ; echo "${optional_stdlib_modules[*]}")"; then
-  echo "The above optional stdlib module failed to import! Check the compile logs to see if it was skipped due to missing libraries/headers."
-  exit 1
+
+# zstd support was added in Python 3.14:
+# https://docs.python.org/3.14/whatsnew/3.14.html#whatsnew314-zstandard
+if [[ "${major_python_version}" != +(3.10|3.11|3.12|3.13) ]]; then
+	optional_stdlib_modules+=(
+		compression.zstd
+	)
+fi
+
+# crypt was removed in Python 3.13:
+# https://docs.python.org/3.13/whatsnew/3.13.html#whatsnew313-pep594
+if [[ "${major_python_version}" == +(3.10|3.11|3.12) ]]; then
+	optional_stdlib_modules+=(
+		crypt
+	)
+fi
+
+if "${INSTALL_DIR}/bin/python3" -c "import $(
+	IFS=,
+	echo "${optional_stdlib_modules[*]}"
+)"; then
+	echo "Successfully imported: ${optional_stdlib_modules[*]}"
+else
+	abort "The above optional stdlib module failed to import! Check the compile logs to see if it was skipped due to missing libraries/headers."
 fi
