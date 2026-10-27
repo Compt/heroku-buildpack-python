@@ -1,38 +1,52 @@
 #!/usr/bin/env bash
 
-# This script is run in a subshell via sub_env so doesn't inherit the options/vars/utils from `bin/compile`.
-# TODO: Stop running this script in a subshell.
-set -eo pipefail
+# This script is run in a subshell so doesn't inherit the options/vars/utils from `bin/compile`.
+# TODO: Migrate this script to functions under `lib/` and stop running the entire script in a subshell.
+set -euo pipefail
 BUILDPACK_DIR=$(cd "$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")" && pwd)
 source "${BUILDPACK_DIR}/bin/utils"
-
-# Required for `meta_set`.
-source "${BUILDPACK_DIR}/lib/metadata.sh"
-# shellcheck disable=SC2153
-meta_init "${CACHE_DIR}" "python"
+source "${BUILDPACK_DIR}/lib/build_data.sh"
+source "${BUILDPACK_DIR}/lib/output.sh"
 
 # These are required by `set_env`.
-PROFILE_PATH="${BUILD_DIR}/.profile.d/python.sh"
+PROFILE_PATH="${BUILD_DIR:?}/.profile.d/python.sh"
 EXPORT_PATH="${BUILDPACK_DIR}/export"
 
 # Check that nltk was installed by pip, otherwise obviously not needed
+# shellcheck disable=SC2310 # TODO: This function is invoked in an 'if' condition so set -e will be disabled.
 if is_module_available 'nltk'; then
-    puts-step "Downloading NLTK corpora..."
+	output::step "Downloading NLTK corpora..."
 
-    nltk_packages_definition="$BUILD_DIR/nltk.txt"
+	nltk_packages_definition="${BUILD_DIR}/nltk.txt"
 
-    if [[ -f "$nltk_packages_definition" ]]; then
-        meta_set "nltk_downloader" "enabled"
+	if [[ -f "${nltk_packages_definition}" ]]; then
+		build_data::set_string "nltk_downloader" "enabled"
 
-        readarray -t nltk_packages < "$nltk_packages_definition"
-        puts-step "Downloading NLTK packages: ${nltk_packages[*]}"
+		readarray -t nltk_packages <"${nltk_packages_definition}"
+		output::step "Downloading NLTK packages: ${nltk_packages[*]}"
 
-        python -m nltk.downloader -d "$BUILD_DIR/.heroku/python/nltk_data" "${nltk_packages[@]}" | indent
-        set_env NLTK_DATA "/app/.heroku/python/nltk_data"
+		# Note: We have to use the raw build directory path here and not the symlinked `/app` path,
+		# otherwise it will cause a false positive in NLTK v3.9.3's new Zip Slip security check,
+		# which doesn't handle symlinked paths correctly: https://github.com/nltk/nltk/issues/3509
+		# TODO: Does this even need user-provided env vars, or can we remove the sub_env usage here?
+		if ! sub_env python -m nltk.downloader -d "${BUILD_DIR}/.heroku/python/nltk_data" "${nltk_packages[@]}" |& output::indent; then
+			output::error <<-EOF
+				Error: Unable to download NLTK data.
 
-    else
-        meta_set "nltk_downloader" "skipped-no-nltk-file"
-        puts-warn "'nltk.txt' not found, not downloading any corpora"
-        puts-warn "Learn more: https://devcenter.heroku.com/articles/python-nltk"
-    fi
+				The 'python -m nltk.downloader' command to download NLTK
+				data didn't exit successfully.
+
+				See the log output above for more information.
+			EOF
+			build_data::set_string "failure_reason" "nltk-downloader"
+			exit 1
+		fi
+
+		# Since this will be used at runtime, we must use the symlinked `/app` path and not
+		# the raw build directory path.
+		set_env NLTK_DATA "/app/.heroku/python/nltk_data"
+	else
+		build_data::set_string "nltk_downloader" "skipped-no-nltk-file"
+		echo "       'nltk.txt' not found, not downloading any corpora"
+	fi
 fi

@@ -6,23 +6,32 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Used by shfmt and more.
+  FORCE_COLOR: 1
 
 jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Ruby and dependencies
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
-          ruby-version: "3.3"
+          ruby-version: "4.0"
       - name: Run ShellCheck
         run: make lint-scripts
+      - name: Run shfmt
+        uses: docker://mvdan/shfmt:latest
+        with:
+          args: "--diff ."
       - name: Run Rubocop
         run: bundle exec rubocop
 
@@ -31,24 +40,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: ["heroku-20", "heroku-22", "heroku-24"]
+        stack: ["heroku-22", "heroku-24", "heroku-26"]
     env:
-      HATCHET_APP_LIMIT: 200
       HATCHET_DEFAULT_STACK: ${{ matrix.stack }}
-      HATCHET_EXPENSIVE_MODE: 1
       HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
       HEROKU_API_USER: ${{ secrets.HEROKU_API_USER }}
       HEROKU_DISABLE_AUTOUPDATE: 1
-      PARALLEL_SPLIT_TEST_PROCESSES: 60
-      RSPEC_RETRY_RETRY_COUNT: 3
+      PARALLEL_SPLIT_TEST_PROCESSES: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Ruby and dependencies
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
-          ruby-version: "3.3"
+          ruby-version: "4.0"
       - name: Hatchet setup
         run: bundle exec hatchet ci:setup
       - name: Run Hatchet integration tests
@@ -57,17 +63,12 @@ jobs:
 
   container-test:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        # Work around lack of TTY causing errors when using `docker run -it`:
-        # https://github.com/actions/runner/issues/241
-        shell: 'script -q -e -c "bash -eo pipefail {0}"'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       # These test both the local development `make run` workflow and that `bin/report` completes successfully
       # for both passing and failing builds (since `bin/report` can't easily be tested via Hatchet tests).
       - name: Run buildpack using default app fixture
         run: make run
       - name: Run buildpack using an app fixture that's expected to fail
-        run: make run FIXTURE=spec/fixtures/python_version_invalid/
+        run: make run FIXTURE=spec/fixtures/python_version_file_invalid_version/ COMPILE_FAILURE_EXIT_CODE=0

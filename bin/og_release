@@ -3,6 +3,7 @@
 # See: https://devcenter.heroku.com/articles/buildpack-api
 
 set -euo pipefail
+shopt -s inherit_errexit
 
 BUILD_DIR="${1}"
 
@@ -12,19 +13,16 @@ BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
 # Unfortunately the build system doesn't source the `export` script before
 # running `bin/release`, so we have to do so manually to ensure the buildpack
 # Python is used by `is_module_available` instead of system Python.
-# We also have to disable Bash error on undefined variables, since not all env
-# vars used in the export script will be set by default (eg `LIBRARY_PATH`).
-set +u
 # shellcheck source=/dev/null
 source "${BUILDPACK_DIR}/export"
-set -u
 
 source "${BUILDPACK_DIR}/bin/utils"
 
+# shellcheck disable=SC2310 # TODO: This function is invoked in an '&&' condition so set -e will be disabled.
 if [[ -f "${BUILD_DIR}/manage.py" ]] && is_module_available 'django' && is_module_available 'psycopg2'; then
-cat <<EOF
----
-addons:
-  - heroku-postgresql
-EOF
+	cat <<-'EOF'
+		---
+		addons:
+		  - heroku-postgresql
+	EOF
 fi

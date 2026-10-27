@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+
+# This is technically redundant, since all consumers of this lib will have enabled these,
+# however, it helps Shellcheck realise the options under which these functions will run.
+set -euo pipefail
+
+PIP_VERSION=$(utils::get_requirement_version 'pip')
+# This is hardcoded rather than managed by Dependabot since we can't update to newer versions due to:
+# https://github.com/heroku/heroku-buildpack-python/pull/1630#issuecomment-2324236653
+# Also, once we drop support for older Pythons we'll stop installing setuptools entirely.
+SETUPTOOLS_VERSION='70.3.0'
+
+function pip::install_pip() {
+	local python_home="${1}"
+	local python_major_version="${2}"
+	local export_file="${3}"
+	local profile_d_file="${4}"
+
+	build_data::set_string "pip_version" "${PIP_VERSION}"
+
+	local packages_to_install=(
+		"pip==${PIP_VERSION}"
+	)
+	local packages_display_text="pip ${PIP_VERSION}"
+
+	# We only install setuptools on Python 3.12 and older, since:
+	# - pip now uses isolated build environments into which it installs setuptools and wheel
+	#   if needed when installing packages from an sdist.
+	# - Most of the Python ecosystem has stopped installing them for Python 3.12+ already.
+	# See the Python CNB's removal for more details: https://github.com/heroku/buildpacks-python/pull/243
+	if [[ "${python_major_version}" == +(3.10|3.11|3.12) ]]; then
+		build_data::set_string "setuptools_version" "${SETUPTOOLS_VERSION}"
+		packages_to_install+=(
+			"setuptools==${SETUPTOOLS_VERSION}"
+		)
+		packages_display_text+=" and setuptools ${SETUPTOOLS_VERSION}"
+	fi
+
+	# Note: We still perform this install step even if the cache was reused, since we have no guarantee
+	# that the cached package versions are correct (different versions could have been specified in the
+	# app's requirements.txt in the last build). The install will be a no-op if the versions match.
+	output::step "Installing ${packages_display_text}"
+
+	# We use the pip wheel bundled within Python's standard library to install our chosen
+	# pip version, since it's faster than `ensurepip` followed by an upgrade in place.
+	local bundled_pip_module_path
+	bundled_pip_module_path="$(utils::bundled_pip_module_path "${python_home}" "${python_major_version}")"
+
+	# `--isolated`: Prevents any custom pip configuration added by third party buildpacks (via env
+	#               vars or global config files) from breaking package manager bootstrapping.
+	# shellcheck disable=SC2310 # This function is invoked in an 'if' condition so set -e will be disabled.
+	if ! {
+		python "${bundled_pip_module_path}" \
+			install \
+			--disable-pip-version-check \
+			--isolated \
+			--no-cache-dir \
+			--no-input \
+			--quiet \
+			"${packages_to_install[@]}" \
+			|& output::indent
+	}; then
+		output::error <<-EOF
+			Error: Unable to install pip.
+
+			In some cases, this happens due to a temporary issue with
+			the network connection or Python Package Index (PyPI).
+
+			Try building again to see if the error resolves itself.
+
+			If that doesn't help, check the status of PyPI here:
+			https://status.python.org
+		EOF
+		build_data::set_string "failure_reason" "install-package-manager::pip"
+		exit 1
+	fi
+
+	# Saves us having to pass `--disable-pip-version-check` each time pip is used. Note: We can't use
+	# this for the pip install usage above, since `--isolated` disables reading of `PIP_` env vars.
+	export PIP_DISABLE_PIP_VERSION_CHECK="1"
+
+	# Set the same env vars in the environment used by later buildpacks.
+	cat >>"${export_file}" <<-EOF
+		export PIP_DISABLE_PIP_VERSION_CHECK="1"
+	EOF
+
+	# And the environment used at app run-time.
+	cat >>"${profile_d_file}" <<-EOF
+		export PIP_DISABLE_PIP_VERSION_CHECK="1"
+	EOF
+}
+
+function pip::install_dependencies() {
+	# Make select pip config vars set on the Heroku app available to pip.
+	# TODO: Expose all config vars (after suitable checks are added for unsafe env vars)
+	# to allow for the env var interpolation feature of requirements files to work.
+	#
+	# PIP_EXTRA_INDEX_URL allows for an alternate pypi URL to be used.
+	# shellcheck disable=SC2154 # TODO: Env var is referenced but not assigned.
+	if [[ -r "${ENV_DIR}/PIP_EXTRA_INDEX_URL" ]]; then
+		PIP_EXTRA_INDEX_URL="$(cat "${ENV_DIR}/PIP_EXTRA_INDEX_URL")"
+		export PIP_EXTRA_INDEX_URL
+	fi
+
+	local pip_install_command=(
+		pip
+		install
+		-r requirements.txt
+	)
+
+	# Install test dependencies too when the buildpack is invoked via `bin/test-compile` on Heroku CI.
+	# We install both requirements files at the same time to allow pip to resolve version conflicts.
+	if [[ -v INSTALL_TEST && -f requirements-test.txt ]]; then
+		pip_install_command+=(-r requirements-test.txt)
+	fi
+
+	# We only display the most relevant command args here, to improve the signal to noise ratio.
+	output::step "Installing dependencies using '${pip_install_command[*]}'"
+
+	local install_log
+	install_log=$(mktemp)
+
+	# The sed usage is to reduce the verbosity of output lines like:
+	# ...when using Python 3.10 and older:
+	# "Requirement already satisfied: typing-extensions==4.15.0 in ./.heroku/python/lib/python3.10/site-packages (from -r requirements.txt (line 2)) (4.15.0)"
+	# ...when using Python 3.11+:
+	# "Requirement already satisfied: typing-extensions==4.15.0 in /app/.heroku/python/lib/python3.14/site-packages (from -r requirements.txt (line 5)) (4.15.0)"
+	# shellcheck disable=SC2310 # This function is invoked in an 'if' condition so set -e will be disabled.
+	if ! {
+		"${pip_install_command[@]}" \
+			--exists-action=w \
+			--no-cache-dir \
+			--no-input \
+			--progress-bar off \
+			--src='/app/.heroku/python/src' \
+			|& tee "${install_log}" \
+			|& sed --unbuffered --regexp-extended \
+				--expression 's# in (/app|\.)/\.heroku/python/lib/python[0-9.]+/site-packages##' \
+			|& output::indent
+	}; then
+		# TODO: Overhaul warnings and combine them with error handling.
+		show-warnings "${install_log}"
+
+		output::error <<-EOF
+			Error: Unable to install dependencies using pip.
+
+			See the log output above for more information.
+		EOF
+		build_data::set_string "failure_reason" "install-dependencies::pip"
+		exit 1
+	fi
+}

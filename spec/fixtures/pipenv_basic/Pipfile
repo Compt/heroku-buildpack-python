@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+typing-extensions = "*"
+# Test that dependencies that happen to also be vendored dependencies of Pipenv are correctly installed,
+# since Pipenv's --system mode is buggy and requires a workaround to ensure they aren't skipped.
+certifi = "*"
+packaging = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.14"

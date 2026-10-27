@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+# This file is run by the inline buildpack, and tests that the environment is
+# configured as expected for buildpacks that run after the Python buildpack.
+
+set -euo pipefail
+
+BUILD_DIR="${1}"
+CACHE_DIR="${2}"
+
+cd "${BUILD_DIR}"
+
+bin/print-env-vars.sh
+echo
+
+python -c 'import pprint, sys; pprint.pp(sys.path)'
+echo
+
+pipenv --version
+# We have to resort to using pip to list installed packages, since `pipenv graph` doesn't support `--system`.
+python -m ensurepip --default-pip >/dev/null
+pip list --disable-pip-version-check --exclude pip
+echo
+
+python -c 'import typing_extensions; print(typing_extensions)'
+# Test that dependencies that happen to also be vendored dependencies of Pipenv are correctly installed,
+# since Pipenv's --system mode is buggy and requires a workaround to ensure they aren't skipped.
+python -c 'import certifi; print(certifi)'
+python -c 'import packaging; print(packaging)'
+echo
+
+jq --sort-keys '.' "${CACHE_DIR}/build-data/python.json"

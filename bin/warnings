@@ -1,14 +1,51 @@
 #!/usr/bin/env bash
 
-gdal-missing() {
-  if grep -qi 'Could not find gdal-config' "$WARNINGS_LOG"; then
-    echo
-    puts-warn "Hello! Package installation failed since the GDAL library was not found."
-    puts-warn "For GDAL, GEOS and PROJ support, use the Geo buildpack alongside the Python buildpack:"
-    puts-warn "https://github.com/heroku/heroku-geo-buildpack"
-  fi
-}
-
 show-warnings() {
-  gdal-missing
+	local install_log="${1}"
+
+	# shellcheck disable=SC2154 # TODO: Env var is referenced but not assigned.
+	if grep -qi 'Could not find gdal-config' "${install_log}"; then
+		output::error <<-'EOF'
+			Error: Package installation failed since the GDAL library wasn't found.
+
+			For GDAL, GEOS and PROJ support, use the Geo buildpack alongside the Python buildpack:
+			https://github.com/heroku/heroku-geo-buildpack
+		EOF
+		build_data::set_string "failure_detail" "Could not find gdal-config"
+	elif grep -qi 'sqlite3.h: No such file or directory' "${install_log}"; then
+		output::error <<-'EOF'
+			Error: Package installation failed since SQLite headers weren't found.
+
+			The Python buildpack no longer installs the SQLite headers
+			package since most apps don't require it.
+
+			If you're trying to install the `pysqlite3` package, we
+			recommend using the virtually identical `sqlite3` module in
+			Python's standard library instead:
+			https://docs.python.org/3/library/sqlite3.html
+
+			To do this:
+			1. Remove the `pysqlite3` package from your dependencies.
+			2. Replace any `pysqlite3` imports in your app with `sqlite3`.
+
+			Alternatively, if you can't use the `sqlite3` stdlib module,
+			update your `pysqlite3` package to 0.6.0 or newer, since the
+			newer versions are published with pre-compiled wheels and so
+			don't need the SQLite headers to be installed.
+		EOF
+		build_data::set_string "failure_detail" "sqlite3.h: No such file or directory"
+	elif grep -qi 'Please use pip<24.1 if you need to use this version' "${install_log}"; then
+		output::error <<-'EOF'
+			Error: One of your dependencies contains broken metadata.
+
+			Newer versions of pip reject packages that use invalid versions
+			in their metadata (such as Celery older than v5.2.1).
+
+			Try upgrading to a newer version of the affected package.
+
+			For more help, see:
+			https://devcenter.heroku.com/changelog-items/3073
+		EOF
+		build_data::set_string "failure_detail" "Please use pip<24.1 if you need to use this version"
+	fi
 }

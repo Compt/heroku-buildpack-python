@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
+# This script is used by buildpack maintainers to compile new Python versions as they are released,
+# ready for upload to S3. (It isn't run as part of normal buildpack execution during app builds.)
+# See `builds/README.md` for how to invoke this via GitHub Actions.
+
 set -euo pipefail
+shopt -s inherit_errexit
 
 PYTHON_VERSION="${1:?"Error: The Python version to build must be specified as the first argument."}"
 PYTHON_MAJOR_VERSION="${PYTHON_VERSION%.*}"
@@ -14,78 +19,67 @@ INSTALL_DIR="/tmp/python"
 SRC_DIR="/tmp/src"
 UPLOAD_DIR="/tmp/upload"
 
-function error() {
-  echo "Error: ${1}" >&2
-  exit 1
+function abort() {
+	echo "Error: ${1}" >&2
+	exit 1
 }
 
-case "${STACK}" in
-  heroku-24)
-    SUPPORTED_PYTHON_VERSIONS=(
-      "3.10"
-      "3.11"
-      "3.12"
-    )
-    ;;
-  heroku-22)
-    SUPPORTED_PYTHON_VERSIONS=(
-      "3.9"
-      "3.10"
-      "3.11"
-      "3.12"
-    )
-    ;;
-  heroku-20)
-    SUPPORTED_PYTHON_VERSIONS=(
-      "3.8"
-      "3.9"
-      "3.10"
-      "3.11"
-      "3.12"
-    )
-    ;;
-  *)
-    error "Error: Unsupported stack '${STACK}'!"
-    ;;
+case "${STACK:?}" in
+	heroku-22 | heroku-24 | heroku-26)
+		SUPPORTED_PYTHON_VERSIONS=(
+			"3.10"
+			"3.11"
+			"3.12"
+			"3.13"
+			"3.14"
+			"3.15"
+		)
+		;;
+	*)
+		abort "Unsupported stack '${STACK}'!"
+		;;
 esac
 
-if [[ ! " ${SUPPORTED_PYTHON_VERSIONS[*]} " == *" ${PYTHON_MAJOR_VERSION} "* ]]; then
-  error "Error: Python ${PYTHON_MAJOR_VERSION} is not supported on ${STACK}!"
+if [[ " ${SUPPORTED_PYTHON_VERSIONS[*]} " != *" ${PYTHON_MAJOR_VERSION} "* ]]; then
+	abort "Python ${PYTHON_MAJOR_VERSION} isn't supported on ${STACK}!"
 fi
 
-# The release keys can be found on https://www.python.org/downloads/ -> "OpenPGP Public Keys".
+# Sigstore identities taken from: https://www.python.org/downloads/metadata/sigstore/
 case "${PYTHON_MAJOR_VERSION}" in
-  3.12)
-    # https://github.com/Yhg1s.gpg
-    GPG_KEY_FINGERPRINT='7169605F62C751356D054A26A821E680E5FA6305'
-    ;;
-  3.10|3.11)
-    # https://keybase.io/pablogsal/
-    GPG_KEY_FINGERPRINT='A035C8C19219BA821ECEA86B64E628F8D684696D'
-    ;;
-  3.8|3.9)
-    # https://keybase.io/ambv/
-    GPG_KEY_FINGERPRINT='E3FF2839C048B25C084DEBE9B26995E310250568'
-    ;;
-  *)
-    error "Error: Unsupported Python version '${PYTHON_MAJOR_VERSION}'!"
-    ;;
+	3.14 | 3.15)
+		SIGSTORE_IDENTITY='hugo@python.org'
+		SIGSTORE_ISSUER='https://github.com/login/oauth'
+		;;
+	3.12 | 3.13)
+		SIGSTORE_IDENTITY='thomas@python.org'
+		SIGSTORE_ISSUER='https://accounts.google.com'
+		;;
+	3.10 | 3.11)
+		SIGSTORE_IDENTITY='pablogsal@python.org'
+		SIGSTORE_ISSUER='https://accounts.google.com'
+		;;
+	*)
+		abort "Unsupported Python version '${PYTHON_MAJOR_VERSION}'!"
+		;;
 esac
 
 echo "Building Python ${PYTHON_VERSION} for ${STACK} (${ARCH})..."
 
 SOURCE_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz"
-SIGNATURE_URL="${SOURCE_URL}.asc"
+SIGSTORE_BUNDLE_URL="${SOURCE_URL}.sigstore"
 
 set -o xtrace
 
 mkdir -p "${SRC_DIR}" "${INSTALL_DIR}" "${UPLOAD_DIR}"
 
-curl --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -o python.tgz "${SOURCE_URL}"
-curl --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -o python.tgz.asc "${SIGNATURE_URL}"
+curl --fail --retry 5 --retry-connrefused --connect-timeout 3 --max-time 30 -o python.tgz "${SOURCE_URL}"
+curl --fail --retry 5 --retry-connrefused --connect-timeout 3 --max-time 30 -o python.tgz.sigstore "${SIGSTORE_BUNDLE_URL}"
 
-gpg --batch --verbose --recv-keys "${GPG_KEY_FINGERPRINT}"
-gpg --batch --verify python.tgz.asc python.tgz
+cosign verify-blob \
+	--bundle python.tgz.sigstore \
+	--certificate-identity "${SIGSTORE_IDENTITY}" \
+	--certificate-oidc-issuer "${SIGSTORE_ISSUER}" \
+	python.tgz
 
 tar --extract --file python.tgz --strip-components=1 --directory "${SRC_DIR}"
 cd "${SRC_DIR}"
@@ -94,59 +88,60 @@ cd "${SRC_DIR}"
 # for maximum compatibility / most battle-tested build configuration:
 # https://github.com/docker-library/python
 CONFIGURE_OPTS=(
-  # Explicitly set the target architecture rather than auto-detecting based on the host CPU.
-  # This only affects targets like i386 (for which we don't build), but we pass it anyway for
-  # completeness and parity with the Python Docker image builds.
-  "--build=$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"
-  # Support loadable extensions in the `_sqlite` extension module.
-  "--enable-loadable-sqlite-extensions"
-  # Enable recommended release build performance optimisations such as PGO.
-  "--enable-optimizations"
-  # Make autoconf's configure option validation more strict.
-  "--enable-option-checking=fatal"
-  # Install Python into `/tmp/python` rather than the default of `/usr/local`.
-  "--prefix=${INSTALL_DIR}"
-  # Skip running `ensurepip` as part of install, since the buildpack installs a curated
-  # version of pip itself (which ensures it's consistent across Python patch releases).
-  "--with-ensurepip=no"
-  # Build the `pyexpat` module using the `expat` library in the base image (which will
-  # automatically receive security updates), rather than CPython's vendored version.
-  "--with-system-expat"
+	# Explicitly set the target architecture rather than auto-detecting based on the host CPU.
+	# This only affects targets like i386 (for which we don't build), but we pass it anyway for
+	# completeness and parity with the Python Docker image builds.
+	"--build=$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"
+	# Support loadable extensions in the `_sqlite` extension module.
+	"--enable-loadable-sqlite-extensions"
+	# Enable recommended release build performance optimisations such as PGO.
+	"--enable-optimizations"
+	# Make autoconf's configure option validation more strict.
+	"--enable-option-checking=fatal"
+	# Shared builds are beneficial for a number of reasons:
+	# - Reduces the size of the build, since it avoids the duplication between
+	#   the Python binary and the static library.
+	# - Permits use-cases that only work with the shared Python library,
+	#   and not the static library (such as `pycall.rb` or `PyO3`).
+	# - More consistent with the official Python Docker images and other distributions.
+	#
+	# Shared builds are slower unless `no-semantic-interposition` and LTO are used,
+	# however, as of Python 3.10 `no-semantic-interposition` is enabled by default:
+	# https://fedoraproject.org/wiki/Changes/PythonNoSemanticInterpositionSpeedup
+	# https://github.com/python/cpython/issues/83161
+	"--enable-shared"
+	# Install Python into `/tmp/python` rather than the default of `/usr/local`.
+	"--prefix=${INSTALL_DIR}"
+	# Skip running `ensurepip` as part of install, since the buildpack installs a curated
+	# version of pip itself (which ensures it's consistent across Python patch releases).
+	"--with-ensurepip=no"
+	"--with-lto"
+	# Counter-intuitively, the static library is still generated by default even when
+	# the shared library is enabled, so we disable it to reduce the build size.
+	# This option only exists for Python 3.10+.
+	"--without-static-libpython"
 )
 
-if [[ "${PYTHON_MAJOR_VERSION}" != 3.[8-9] ]]; then
-  CONFIGURE_OPTS+=(
-    # Shared builds are beneficial for a number of reasons:
-    # - Reduces the size of the build, since it avoids the duplication between
-    #   the Python binary and the static library.
-    # - Permits use-cases that only work with the shared Python library,
-    #   and not the static library (such as `pycall.rb` or `PyO3`).
-    # - More consistent with the official Python Docker images and other distributions.
-    #
-    # However, shared builds are slower unless `no-semantic-interposition`and LTO is used:
-    # https://fedoraproject.org/wiki/Changes/PythonNoSemanticInterpositionSpeedup
-    # https://github.com/python/cpython/issues/83161
-    #
-    # It's only as of Python 3.10 that `no-semantic-interposition` is enabled by default,
-    # so we only use shared builds on Python 3.10+ to avoid needing to override the default
-    # compiler flags.
-    "--enable-shared"
-    "--with-lto"
-    # Counter-intuitively, the static library is still generated by default even when
-    # the shared library is enabled, so we disable it to reduce the build size.
-    # This option only exists for Python 3.10+.
-    "--without-static-libpython"
-  )
+if [[ "${PYTHON_MAJOR_VERSION}" != +(3.10) ]]; then
+	CONFIGURE_OPTS+=(
+		# Skip building the test modules, since we remove them after the build anyway.
+		# This feature was added in Python 3.10, however it wasn't until Python 3.11
+		# that compatibility issues between it and PGO were fixed:
+		# https://github.com/python/cpython/pull/29315
+		"--disable-test-modules"
+	)
 fi
 
-if [[ "${PYTHON_MAJOR_VERSION}" == "3.11" || "${PYTHON_MAJOR_VERSION}" == "3.12" ]]; then
-  CONFIGURE_OPTS+=(
-    # Skip building the test modules, since we remove them after the build anyway.
-    # This feature was added in Python 3.10+, however it wasn't until Python 3.11
-    # that compatibility issues between it and PGO were fixed:
-    # https://github.com/python/cpython/pull/29315
-    "--disable-test-modules"
-  )
+if [[ "${PYTHON_MAJOR_VERSION}" == "3.15" ]]; then
+	CONFIGURE_OPTS+=(
+		# Python 3.15 no longer implicitly falls back to the bundled `libmpdec` if the system library
+		# isn't found, so we have to opt in explicitly. (Earlier versions fall back automatically.)
+		# We can't use the system library yet, since Ubuntu 24.04 doesn't currently ship `libmpdec-dev`.
+		# TODO: Switch to the `libmpdec-dev` package once Ubuntu has re-added it for 24.04 (which we've
+		# requested) and it's available on our stacks:
+		# https://bugs.launchpad.net/ubuntu/+source/mpdecimal/+bug/2167730
+		"--without-system-libmpdec"
+	)
 fi
 
 ./configure "${CONFIGURE_OPTS[@]}"
@@ -160,31 +155,15 @@ fi
 # - https://wiki.ubuntu.com/ToolChain/CompilerFlags
 # - https://wiki.debian.org/Hardening
 # - https://github.com/docker-library/python/issues/810
-# We only use `dpkg-buildflags` for Python versions where we build in shared mode (Python 3.9+),
-# since some of the options it enables interferes with the stripping of static libraries.
-if [[ "${PYTHON_MAJOR_VERSION}" == 3.[8-9] ]]; then
-  EXTRA_CFLAGS=''
-  LDFLAGS='-Wl,--strip-all'
-else
-  EXTRA_CFLAGS="$(dpkg-buildflags --get CFLAGS)"
-  LDFLAGS="$(dpkg-buildflags --get LDFLAGS) -Wl,--strip-all"
-fi
+EXTRA_CFLAGS="$(dpkg-buildflags --get CFLAGS)"
+LDFLAGS="$(dpkg-buildflags --get LDFLAGS) -Wl,--strip-all"
 
-make -j "$(nproc)" "EXTRA_CFLAGS=${EXTRA_CFLAGS}" "LDFLAGS=${LDFLAGS}"
+CPU_COUNT="$(nproc)"
+make -j "${CPU_COUNT}" "EXTRA_CFLAGS=${EXTRA_CFLAGS}" "LDFLAGS=${LDFLAGS}"
 make install
 
-if [[ "${PYTHON_MAJOR_VERSION}" == 3.[8-9] ]]; then
-  # On older versions of Python we're still building the static library, which has to be
-  # manually stripped since the linker stripping enabled in LDFLAGS doesn't cover them.
-  # We're using `--strip-unneeded` since `--strip-all` would remove the `.symtab` section
-  # that is required for static libraries to be able to be linked.
-  # `find` is used since there are multiple copies of the static library in version-specific
-  # locations, eg:
-  #   - `lib/libpython3.9.a`
-  #   - `lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.a`
-  find "${INSTALL_DIR}" -type f -name '*.a' -print -exec strip --strip-unneeded '{}' +
-elif ! find "${INSTALL_DIR}" -type f -name '*.a' -print -exec false '{}' +; then
-  error "Error: Unexpected static libraries found!"
+if ! find "${INSTALL_DIR}" -type f -name '*.a' -print -exec false '{}' +; then
+	abort "Unexpected static libraries found!"
 fi
 
 # Remove unneeded test directories, similar to the official Docker Python images:
@@ -217,6 +196,16 @@ find "${INSTALL_DIR}" -depth -type f -name "*.pyc" -delete
 # `.pyc` generation run by `make install`:
 # https://github.com/python/cpython/blob/v3.11.3/Makefile.pre.in#L2087-L2113
 LD_LIBRARY_PATH="${SRC_DIR}" "${SRC_DIR}/python" -m compileall -f --invalidation-mode unchecked-hash --workers 0 "${INSTALL_DIR}"
+
+# Delete entrypoint scripts (and their symlinks) that don't work with relocated Python since they
+# hardcode the Python install directory in their shebangs (e.g. `#!/tmp/python/bin/python3.NN`).
+# These scripts are rarely used in production, and can still be accessed via their Python module
+# (e.g. `python -m pydoc`) if needed.
+rm "${INSTALL_DIR}"/bin/{idle,pydoc}*
+# The 2to3 module and entrypoint was removed from the stdlib in Python 3.13.
+if [[ "${PYTHON_MAJOR_VERSION}" == +(3.10|3.11|3.12) ]]; then
+	rm "${INSTALL_DIR}"/bin/2to3*
+fi
 
 # Support using Python 3 via the version-less `python` command, for parity with virtualenvs,
 # the Python Docker images and to also ensure buildpack Python shadows any installed system

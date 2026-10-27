@@ -17,12 +17,13 @@ RSpec.describe 'Buildpack detection' do
           remote:  !     Error: Your app is configured to use the Python buildpack,
           remote:  !     but we couldn't find any supported Python project files.
           remote:  !     
-          remote:  !     A Python app on Heroku must have either a 'requirements.txt' or
-          remote:  !     'Pipfile' package manager file in the root directory of its
-          remote:  !     source code.
+          remote:  !     A Python app on Heroku must have either a 'requirements.txt',
+          remote:  !     'Pipfile.lock', 'poetry.lock' or 'uv.lock' package manager file
+          remote:  !     in the root directory of its source code.
           remote:  !     
           remote:  !     Currently the root directory of your app contains:
           remote:  !     
+          remote:  !     .example-dotfile
           remote:  !     README.md
           remote:  !     subdir/
           remote:  !     
@@ -31,15 +32,23 @@ RSpec.describe 'Buildpack detection' do
           remote:  !     1. Is in the top level directory (not a subdirectory).
           remote:  !     2. Has the correct spelling (the filenames are case-sensitive).
           remote:  !     3. Isn't listed in '.gitignore' or '.slugignore'.
+          remote:  !     4. Has been added to the Git repository using 'git add --all'
+          remote:  !        and then committed using 'git commit'.
           remote:  !     
           remote:  !     Otherwise, add a package manager file to your app. If your app has
           remote:  !     no dependencies, then create an empty 'requirements.txt' file.
+          remote:  !     
+          remote:  !     If you aren't sure which package manager to use, we recommend
+          remote:  !     trying uv, since it supports lockfiles, is extremely fast, and
+          remote:  !     is actively maintained by a full-time team:
+          remote:  !     https://docs.astral.sh/uv/
           remote:  !     
           remote:  !     For help with using Python on Heroku, see:
           remote:  !     https://devcenter.heroku.com/articles/getting-started-with-python
           remote:  !     https://devcenter.heroku.com/articles/python-support
           remote: 
-          remote:        More info: https://devcenter.heroku.com/articles/buildpacks#detection-failure
+          remote: 
+          remote:        More info: https://devcenter.heroku.com/articles/buildpacks#buildpack-auto-detection
         OUTPUT
       end
     end
